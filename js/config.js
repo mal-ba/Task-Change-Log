@@ -6,7 +6,7 @@ window.SCOPELOG_CONFIG = {
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlrZ2p2eGN4YXN3ZnBwdG5uZGVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxODg2NjIsImV4cCI6MjEwODc2NDY2Mn0.S0PU4yyzXNg0ay77_ZyxEQ6I2MfOzB2rYYRra_4pjtc',
   // Supabase 대시보드에서 해당 로그인 방식을 켠 뒤 true로 바꿔 주세요.
   providers: {
-    google: false,
+    google: true,
     kakao: false,
   },
 };
