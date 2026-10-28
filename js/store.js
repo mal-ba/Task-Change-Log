@@ -1,6 +1,7 @@
-// 데이터 저장소: 브라우저 localStorage에 저장 (서버 없음)
+// 데이터 저장소: 브라우저 localStorage에 저장하고, 로그인 상태면 Supabase에도 동기화
 const Store = (() => {
-  const KEY = 'scopelog:v1';
+  const LEGACY_KEY = 'scopelog:v1'; // 로그인 없는 모드의 저장 위치
+  let key = LEGACY_KEY;
 
   const empty = () => ({
     settings: { name: '', business: '' },
@@ -9,17 +10,55 @@ const Store = (() => {
     activity: [],
   });
 
-  let state = load();
+  let state = empty();
 
-  function load() {
+  // 로그인 사용자마다 다른 저장 위치를 써서 계정끼리 데이터가 섞이지 않게 함
+  function init(storageKey = LEGACY_KEY) {
+    key = storageKey;
+    state = readLocal(key) || empty();
+  }
+
+  function readLocal(k) {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(k);
       if (raw) return normalize(JSON.parse(raw));
     } catch (e) {
       console.warn('저장된 데이터를 읽지 못했습니다', e);
     }
-    return empty();
+    return null;
   }
+
+  function writeLocal() {
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+      return true;
+    } catch (e) {
+      UI.toast('저장 공간이 부족해 저장하지 못했어요. 백업 후 오래된 프로젝트를 정리해 주세요.', 'error');
+      return false;
+    }
+  }
+
+  // 서버에 아직 올라가지 않은 변경이 있는지 표시
+  function setDirty(on) {
+    try { on ? localStorage.setItem(key + ':dirty', '1') : localStorage.removeItem(key + ':dirty'); } catch {}
+  }
+  const isDirty = () => { try { return localStorage.getItem(key + ':dirty') === '1'; } catch { return false; } };
+
+  // 서버에서 받은 데이터로 교체 (다시 올리지 않음)
+  function adopt(data) {
+    state = normalize(data);
+    writeLocal();
+    setDirty(false);
+  }
+
+  function clearLocal() {
+    try { localStorage.removeItem(key); localStorage.removeItem(key + ':dirty'); } catch {}
+    state = empty();
+  }
+
+  const hasData = (s = state) => !!(s && (s.projects.length || s.clients.length));
+  const legacyData = () => readLocal(LEGACY_KEY);
+  const clearLegacy = () => { try { localStorage.removeItem(LEGACY_KEY); } catch {} };
 
   function normalize(data) {
     const s = Object.assign(empty(), data || {});
@@ -33,10 +72,10 @@ const Store = (() => {
   }
 
   function save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-    } catch (e) {
-      UI.toast('저장 공간이 부족해 저장하지 못했어요. 백업 후 오래된 프로젝트를 정리해 주세요.', 'error');
+    writeLocal();
+    if (Cloud.enabled && Cloud.user) {
+      setDirty(true);
+      Cloud.schedulePush(() => state, (ok) => { if (ok) setDirty(false); });
     }
   }
 
@@ -316,6 +355,8 @@ const Store = (() => {
 
   return {
     get state() { return state; },
+    get key() { return key; },
+    init, adopt, clearLocal, isDirty, hasData, legacyData, clearLegacy, save,
     getClient, getProject, clientName, actorName,
     updateSettings,
     addClient, updateClient, deleteClient,

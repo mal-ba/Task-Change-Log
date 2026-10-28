@@ -77,6 +77,9 @@ const App = (() => {
   const e = U.esc;
   const app = () => document.getElementById('app');
   const view = { filter: 'all', query: '' };
+  // ready: 로그인 상태 확인 완료, loadingData: 계정 데이터 불러오는 중
+  const auth = { ready: !Cloud.enabled, loadingData: false, mode: 'signin', notice: '' };
+  let loadedUserId = null;
   let currentProjectId = null;
   let lastRoute = '';
 
@@ -94,7 +97,10 @@ const App = (() => {
     document.title = 'ScopeLog · 작업 변경 기록';
 
     let html;
-    if (!page) html = Views.dashboard();
+    const needsLogin = Cloud.enabled && page !== 's';
+    if (needsLogin && (!auth.ready || auth.loadingData)) html = Views.loading(auth.loadingData ? '내 데이터를 불러오는 중…' : '불러오는 중…');
+    else if (needsLogin && !Cloud.user) { document.title = 'ScopeLog · 로그인'; html = Views.login(auth.mode, auth.notice); }
+    else if (!page) html = Views.dashboard();
     else if (page === 'projects' && arg) { currentProjectId = arg; html = Views.project(arg); }
     else if (page === 'projects') html = Views.projects(view.filter, view.query);
     else if (page === 'clients') html = Views.clients();
@@ -119,6 +125,131 @@ const App = (() => {
     app().innerHTML = html;
     window.scrollTo(0, keepScroll ? y : 0);
     lastRoute = routeKey;
+  }
+
+  // ---------- 로그인 / 계정 데이터 ----------
+  async function handleAuth(event, user) {
+    if (event === 'PASSWORD_RECOVERY') {
+      auth.ready = true;
+      if (user && loadedUserId !== user.id) await loadUserData(user);
+      passwordForm('새 비밀번호 설정');
+      return;
+    }
+    if (user && loadedUserId !== user.id) {
+      auth.ready = true;
+      await loadUserData(user);
+      return;
+    }
+    if (!user) {
+      if (loadedUserId) Store.clearLocal();
+      loadedUserId = null;
+      auth.ready = true;
+      render();
+    }
+  }
+
+  async function loadUserData(user) {
+    auth.loadingData = true;
+    loadedUserId = user.id;
+    render();
+    Store.init(`scopelog:v1:${user.id}`);
+    let legacy = null;
+    try {
+      const remote = await Cloud.pull();
+      const remoteHas = remote && remote.data && Array.isArray(remote.data.projects);
+      if (remoteHas && !(Store.isDirty() && Store.hasData())) {
+        Store.adopt(remote.data);
+      } else if (Store.hasData()) {
+        // 이 기기에만 있고 아직 서버에 못 올라간 변경 → 올림
+        Store.save();
+      } else {
+        const old = Store.legacyData();
+        if (old && Store.hasData(old)) legacy = old;
+      }
+    } catch (err) {
+      UI.toast('서버에서 데이터를 불러오지 못했어요. 이 기기에 저장된 내용을 보여드려요.', 'error');
+    }
+    fillName(user);
+    auth.loadingData = false;
+    render();
+
+    // 로그인 전에 이 브라우저에서 쓰던 데이터를 계정으로 옮기기
+    if (legacy) {
+      const n = legacy.projects.length;
+      const ok = await UI.confirm(
+        `이 브라우저에 로그인 전에 쓰던 데이터(프로젝트 ${n}개, 고객 ${legacy.clients.length}명)가 있어요.<br>내 계정으로 옮길까요?`,
+        { ok: '계정으로 옮기기', danger: false, title: '기존 데이터 가져오기' },
+      );
+      if (ok) {
+        Store.importJSON(JSON.stringify(legacy));
+        Store.clearLegacy();
+        fillName(user);
+        UI.toast('기존 데이터를 계정으로 옮겼어요');
+        render();
+      }
+    }
+  }
+
+  // 내 정보에 이름이 비어 있으면 로그인 계정의 이름으로 채움
+  function fillName(user) {
+    if (!Store.state.settings.name && Cloud.userName(user)) Store.updateSettings({ name: Cloud.userName(user) });
+  }
+
+  async function submitAuth(form) {
+    const mode = form.dataset.mode;
+    const d = Object.fromEntries(new FormData(form));
+    const errEl = form.querySelector('.auth-error');
+    const btn = form.querySelector('button.primary');
+    const showError = (msg) => { errEl.textContent = msg; errEl.hidden = false; };
+    const email = (d.email || '').trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return showError('이메일 주소를 확인해 주세요.');
+    if (mode !== 'reset' && (d.password || '').length < 6) return showError('비밀번호는 6자 이상이어야 해요.');
+    errEl.hidden = true;
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '잠시만요…';
+    try {
+      if (mode === 'signin') {
+        await Cloud.signIn(email, d.password);
+      } else if (mode === 'signup') {
+        const { needsConfirm } = await Cloud.signUp(email, d.password, (d.name || '').trim());
+        if (needsConfirm) {
+          auth.mode = 'signin';
+          auth.notice = `${email}로 가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.`;
+          render();
+        }
+      } else {
+        await Cloud.resetPassword(email);
+        auth.mode = 'signin';
+        auth.notice = `${email}로 비밀번호 재설정 링크를 보냈어요.`;
+        render();
+      }
+    } catch (err) {
+      showError(err.message);
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  function passwordForm(title = '비밀번호 변경') {
+    UI.modal({
+      title,
+      submit: '변경하기',
+      body: `
+        <label class="field"><span>새 비밀번호 <em>6자 이상</em></span><input name="password" type="password" autocomplete="new-password" required></label>
+        <label class="field"><span>새 비밀번호 확인</span><input name="confirm" type="password" autocomplete="new-password" required></label>
+        <p class="auth-error" hidden></p>`,
+      onSubmit(d, form) {
+        const err = form.querySelector('.auth-error');
+        const fail = (m) => { err.textContent = m; err.hidden = false; };
+        if (d.password.length < 6) { fail('비밀번호는 6자 이상이어야 해요.'); return false; }
+        if (d.password !== d.confirm) { fail('비밀번호가 서로 달라요.'); return false; }
+        Cloud.updatePassword(d.password)
+          .then(() => { UI.close(); UI.toast('비밀번호를 변경했어요'); })
+          .catch((e2) => fail(e2.message));
+        return false;
+      },
+    });
   }
 
   // ---------- 폼 ----------
@@ -335,6 +466,22 @@ const App = (() => {
     'rev-dec': () => { const p = Store.getProject(currentProjectId); Store.setRevisionsUsed(p.id, (p.scope.revisionsUsed || 0) - 1); render(); },
     'share-link': (el) => showShareLink(el.dataset.project || currentProjectId),
     print: () => window.print(),
+    'auth-mode': (el) => { auth.mode = el.dataset.mode; auth.notice = ''; render(); },
+    async oauth(el) {
+      try { await Cloud.signInWithProvider(el.dataset.provider); }
+      catch (err) { UI.toast(err.message, 'error'); }
+    },
+    async logout() {
+      if (!(await UI.confirm('로그아웃할까요?', { ok: '로그아웃', danger: false }))) return;
+      await Cloud.signOut();
+      Store.clearLocal();
+      loadedUserId = null;
+      auth.mode = 'signin';
+      auth.notice = '';
+      location.hash = '#/';
+      render();
+    },
+    'change-password': () => passwordForm(),
     filter: (el) => { view.filter = el.dataset.filter; render(); },
     backup,
     'all-activity': () => UI.modal({ title: '전체 활동', footer: false, body: Views.activityModalBody() }),
@@ -378,7 +525,10 @@ const App = (() => {
     });
     app().addEventListener('submit', (ev) => {
       const form = ev.target;
-      if (form.dataset.form === 'add-item') {
+      if (form.dataset.form === 'auth') {
+        ev.preventDefault();
+        submitAuth(form);
+      } else if (form.dataset.form === 'add-item') {
         ev.preventDefault();
         const text = form.elements.text.value;
         if (!text.trim()) return;
@@ -402,12 +552,24 @@ const App = (() => {
     });
     window.addEventListener('hashchange', () => { UI.close(); render(); });
     // 다른 탭에서 데이터가 바뀌면 다시 그리기
-    window.addEventListener('storage', (ev) => { if (ev.key === 'scopelog:v1') location.reload(); });
+    window.addEventListener('storage', (ev) => { if (ev.key === Store.key) location.reload(); });
   }
 
   function start() {
     bind();
+    if (!Cloud.enabled) {
+      const cfg = window.SCOPELOG_CONFIG || {};
+      if (cfg.supabaseUrl && !window.supabase) UI.toast('로그인 서버에 연결하지 못했어요. 새로고침해 주세요.', 'error');
+      Store.init();
+      render();
+      return;
+    }
+    Cloud.onStatus((s) => {
+      const el = document.getElementById('sync-status');
+      if (el) el.innerHTML = Views.syncLabel(s);
+    });
     render();
+    Cloud.onAuth(handleAuth);
   }
 
   return { start, render };
