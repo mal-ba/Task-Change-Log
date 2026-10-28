@@ -25,13 +25,84 @@ const Views = (() => {
           <div class="side-user">
             <div class="side-user-row">
               <span class="avatar">${e(U.initial(name))}</span>
-              <div class="side-user-name"><strong>${e(name)}</strong><span>${e(settings.business || '프리랜서')}</span></div>
+              <div class="side-user-name"><strong>${e(name)}</strong><span>${e(Cloud.user?.email || settings.business || '프리랜서')}</span></div>
             </div>
-            <button class="btn sm block" data-action="backup">${icon('download', 15)} 데이터 백업</button>
+            ${Cloud.user ? `
+            <div class="sync" id="sync-status">${syncLabel(Cloud.status)}</div>
+            <button class="btn sm block" data-action="logout">${icon('logout', 15)} 로그아웃</button>` : `
+            <button class="btn sm block" data-action="backup">${icon('download', 15)} 데이터 백업</button>`}
           </div>
         </aside>
         <main class="main">${content}</main>
       </div>`;
+  }
+
+  function syncLabel(status) {
+    const map = {
+      idle: ['cloud', '클라우드에 저장돼요', ''],
+      saved: ['cloud', '모든 변경 저장됨', 'ok'],
+      saving: ['refresh', '저장 중…', ''],
+      error: ['alert', '저장 실패 · 자동 재시도', 'bad'],
+      offline: ['alert', '오프라인 · 연결되면 저장', 'bad'],
+    };
+    const [ic, text, cls] = map[status] || map.idle;
+    return `<span class="${cls}">${icon(ic, 13)} ${text}</span>`;
+  }
+
+  // ---------- 로그인 ----------
+  const GOOGLE_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>`;
+  const KAKAO_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#191919" d="M12 3C6.48 3 2 6.48 2 10.78c0 2.77 1.86 5.2 4.66 6.58l-.95 3.48c-.08.3.26.54.52.37l4.15-2.74c.53.06 1.07.09 1.62.09 5.52 0 10-3.48 10-7.78S17.52 3 12 3z"/></svg>`;
+
+  function login(mode = 'signin', notice = '') {
+    const p = Cloud.providers;
+    const social = [
+      p.google ? `<button class="btn social google" data-action="oauth" data-provider="google">${GOOGLE_SVG} Google로 계속하기</button>` : '',
+      p.kakao ? `<button class="btn social kakao" data-action="oauth" data-provider="kakao">${KAKAO_SVG} 카카오로 계속하기</button>` : '',
+    ].join('');
+    const titles = {
+      signin: ['다시 오신 걸 환영해요', '로그인하고 프로젝트를 이어서 관리하세요.'],
+      signup: ['ScopeLog 시작하기', '무료로 가입하고 어느 기기에서든 기록을 확인하세요.'],
+      reset: ['비밀번호 찾기', '가입한 이메일로 비밀번호 재설정 링크를 보내드려요.'],
+    };
+    const [title, sub] = titles[mode];
+    const submit = { signin: '로그인', signup: '가입하기', reset: '재설정 링크 보내기' }[mode];
+    return `
+      <div class="auth">
+        <section class="auth-card">
+          <a class="brand" href="#/">${LOGO_SVG}<div><strong>ScopeLog</strong><span>작업 범위를 지키는 기록</span></div></a>
+          <h1>${title}</h1>
+          <p class="muted">${sub}</p>
+          ${notice ? `<p class="hint-box">${icon('checkCircle', 15)} ${e(notice)}</p>` : ''}
+          ${mode !== 'reset' && social ? `<div class="social-list">${social}</div><div class="divider"><span>또는 이메일로</span></div>` : ''}
+          <form class="auth-form" data-form="auth" data-mode="${mode}" novalidate>
+            ${mode === 'signup' ? `<label class="field"><span>이름</span><input name="name" autocomplete="name" placeholder="예) 김지훈"></label>` : ''}
+            <label class="field"><span>이메일</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+            ${mode !== 'reset' ? `
+            <label class="field"><span>비밀번호${mode === 'signup' ? ' <em>6자 이상</em>' : ''}</span>
+              <input name="password" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}"></label>` : ''}
+            <p class="auth-error" hidden></p>
+            <button class="btn primary block lg">${submit}</button>
+          </form>
+          <div class="auth-links">
+            ${mode === 'signin' ? `
+              <button class="link-btn" data-action="auth-mode" data-mode="reset">비밀번호를 잊으셨나요?</button>
+              <span>계정이 없으신가요? <button class="link-btn" data-action="auth-mode" data-mode="signup">회원가입</button></span>` : `
+              <span>이미 계정이 있으신가요? <button class="link-btn" data-action="auth-mode" data-mode="signin">로그인</button></span>`}
+          </div>
+        </section>
+        <aside class="auth-side">
+          <h2>처음 약속한 작업과<br>나중에 추가된 작업,<br>이제 헷갈리지 마세요</h2>
+          <ul>
+            <li>${icon('checkCircle', 18)}<div><strong>최초 계약 범위</strong><span>페이지 3개, 수정 2회, 납기 7일</span></div></li>
+            <li>${icon('plusCircle', 18)}<div><strong>추가 요청 기록</strong><span>페이지 2개 추가 · 비용·납기 협의</span></div></li>
+            <li>${icon('fileText', 18)}<div><strong>고객 확인용 변경 내역</strong><span>PDF와 링크로 바로 공유</span></div></li>
+          </ul>
+        </aside>
+      </div>`;
+  }
+
+  function loading(text = '불러오는 중…') {
+    return `<div class="loading"><div class="spinner"></div><p>${e(text)}</p></div>`;
   }
 
   // ---------- 공통 조각 ----------
@@ -434,6 +505,7 @@ const Views = (() => {
     return shell('settings', `
       <header class="page-head"><div><h1>설정</h1><p>내 정보와 데이터를 관리해요.</p></div></header>
       <div class="settings-grid">
+        ${Cloud.user ? accountCard() : ''}
         <form class="card pad" data-form="settings">
           <h3>내 정보</h3>
           <p class="muted small">변경 내역서와 고객 확인 링크에 작업자 이름으로 표시돼요.</p>
@@ -443,7 +515,9 @@ const Views = (() => {
         </form>
         <div class="card pad">
           <h3>${icon('database', 17)} 데이터</h3>
-          <p class="muted small">모든 데이터는 지금 사용하는 브라우저에만 저장돼요. 다른 기기로 옮기거나 브라우저 기록을 지우기 전에 꼭 백업하세요.</p>
+          <p class="muted small">${Cloud.user
+            ? '데이터는 내 계정에 저장되고, 로그인한 모든 기기에서 같은 내용을 볼 수 있어요. 필요하면 파일로도 백업해 두세요.'
+            : '모든 데이터는 지금 사용하는 브라우저에만 저장돼요. 다른 기기로 옮기거나 브라우저 기록을 지우기 전에 꼭 백업하세요.'}</p>
           <div class="btn-col">
             <button class="btn" data-action="backup">${icon('download', 15)} 백업 파일 다운로드 (JSON)</button>
             <label class="btn">${icon('upload', 15)} 백업 파일에서 복원<input type="file" accept="application/json,.json" data-action="restore" hidden></label>
@@ -452,6 +526,24 @@ const Views = (() => {
           </div>
         </div>
       </div>`);
+  }
+
+  function accountCard() {
+    const u = Cloud.user;
+    const provider = { email: '이메일', google: 'Google', kakao: '카카오' }[Cloud.userProvider()] || Cloud.userProvider();
+    return `
+      <div class="card pad">
+        <h3>${icon('user', 17)} 계정</h3>
+        <dl class="info">
+          <dt>이메일</dt><dd>${e(u.email || '-')}</dd>
+          <dt>로그인 방식</dt><dd>${e(provider)}</dd>
+          <dt>가입일</dt><dd>${U.date(u.created_at)}</dd>
+        </dl>
+        <div class="btn-col">
+          ${Cloud.userProvider() === 'email' ? `<button class="btn" data-action="change-password">${icon('lock', 15)} 비밀번호 변경</button>` : ''}
+          <button class="btn" data-action="logout">${icon('logout', 15)} 로그아웃</button>
+        </div>
+      </div>`;
   }
 
   // ---------- 변경 내역서 (인쇄 / 공유) ----------
@@ -480,5 +572,5 @@ const Views = (() => {
     return shell('', `<div class="card"><div class="empty"><p>${e(msg)}</p><a class="btn" href="#/">홈으로</a></div></div>`);
   }
 
-  return { dashboard, projects, project, clients, settings, reportPage, notFound, activityModalBody };
+  return { dashboard, projects, project, clients, settings, reportPage, notFound, activityModalBody, login, loading, syncLabel };
 })();
