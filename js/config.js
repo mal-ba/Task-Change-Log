@@ -7,6 +7,6 @@ window.SCOPELOG_CONFIG = {
   // Supabase 대시보드에서 해당 로그인 방식을 켠 뒤 true로 바꿔 주세요.
   providers: {
     google: true,
-    kakao: false,
+    kakao: true,
   },
 };
